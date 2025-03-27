@@ -106,8 +106,8 @@ convert_user_role() {
     return 0
 }
 
-# === MAP JAMF USERNAME TO LOCAL MAC USERNAME (if needed) ===
-# Assuming they’re same, else you can customize this
+# === MAP JAMF USERNAME TO LOCAL MAC USERNAME (if needed) === 
+# Assuming they’re same, else you can customize this ( in some cases the user's are not same as IDP Account, in such case use console user for making RBAC)
 localUsername="$jamfUsername"
 
 echo "Converting user $localUsername to $userRole role..."
