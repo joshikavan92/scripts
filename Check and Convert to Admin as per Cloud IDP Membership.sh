@@ -5,6 +5,56 @@ jamfProURL="https://server.jamfcloud.com"
 apiUser="username"
 apiPass='password'  # Use single quotes to avoid special char interpretation
 
+# === GET SERIAL NUMBER OF USER's MAC ===
+serialNumber=$(system_profiler SPHardwareDataType | awk '/Serial Number/{print $NF}')
+
+# === REQUEST AUTH TOKEN ===
+authToken=$(curl --silent --request POST \
+    --url "$jamfProURL/api/v1/auth/token" \
+    --user "$apiUser:$apiPass")
+
+# === PARSE AUTH TOKEN ===
+token=$(plutil -extract token raw - <<< "$authToken" 2>/dev/null)
+
+if [ -z "$token" ]; then
+    echo "Error: Failed to obtain authentication token"
+    exit 1
+fi
+
+# === CALL CLASSIC API WITH SERIAL NUMBER ===
+computerXML=$(curl -s \
+  -H "Authorization: Bearer $token" \
+  -H "accept: application/xml" \
+  "$jamfProURL/JSSResource/computers/serialnumber/$serialNumber")
+
+# === PARSE LOCATION USERNAME ===
+jamfUsername=$(echo "$computerXML" | xmllint --xpath "//computer/location/username/text()" - 2>/dev/null)
+
+if [ -z "$jamfUsername" ]; then
+    echo "Error: Could not retrieve username from Jamf"
+    exit 1
+fi
+
+# === TEST USER MEMBERSHIP FOR CLOUD IDP GROUP ===
+membershipCheck=$(curl -s --request POST \
+     --url "$jamfProURL/api/v1/cloud-idp/1001/test-user-membership" \
+     --header "Authorization: Bearer $token" \
+     --header "Accept: application/json" \
+     --header "Content-Type: application/json" \
+     --data '{
+       "username": "'"$jamfUsername"'",
+       "groupname": "UserGroupName"
+     }')
+
+# === PARSE isMember VALUE ===
+isMember=$(echo "$membershipCheck" | grep -o '"isMember" : \w*' | cut -d':' -f2 | tr -d ' ')
+
+if [ "$isMember" = "true" ]; then
+    userRole="admin"
+else
+    userRole="standard"
+fi
+
 # === FUNCTION TO CONVERT USER ROLE ===
 convert_user_role() {
     local localUser="$1"
@@ -55,56 +105,6 @@ convert_user_role() {
 
     return 0
 }
-
-# === GET SERIAL NUMBER OF THIS MAC ===
-serialNumber=$(system_profiler SPHardwareDataType | awk '/Serial Number/{print $NF}')
-
-# === REQUEST AUTH TOKEN ===
-authToken=$(curl --silent --request POST \
-    --url "$jamfProURL/api/v1/auth/token" \
-    --user "$apiUser:$apiPass")
-
-# === PARSE AUTH TOKEN ===
-token=$(plutil -extract token raw - <<< "$authToken" 2>/dev/null)
-
-if [ -z "$token" ]; then
-    echo "Error: Failed to obtain authentication token"
-    exit 1
-fi
-
-# === CALL CLASSIC API WITH SERIAL NUMBER ===
-computerXML=$(curl -s \
-  -H "Authorization: Bearer $token" \
-  -H "accept: application/xml" \
-  "$jamfProURL/JSSResource/computers/serialnumber/$serialNumber")
-
-# === PARSE LOCATION USERNAME ===
-jamfUsername=$(echo "$computerXML" | xmllint --xpath "//computer/location/username/text()" - 2>/dev/null)
-
-if [ -z "$jamfUsername" ]; then
-    echo "Error: Could not retrieve username from Jamf"
-    exit 1
-fi
-
-# === TEST USER MEMBERSHIP FOR CLOUD IDP GROUP ===
-membershipCheck=$(curl -s --request POST \
-     --url "$jamfProURL/api/v1/cloud-idp/1001/test-user-membership" \
-     --header "Authorization: Bearer $token" \
-     --header "Accept: application/json" \
-     --header "Content-Type: application/json" \
-     --data '{
-       "username": "'"$jamfUsername"'",
-       "groupname": "UserGroupName"
-     }')
-
-# === PARSE isMember VALUE ===
-isMember=$(echo "$membershipCheck" | grep -o '"isMember" : \w*' | cut -d':' -f2 | tr -d ' ')
-
-if [ "$isMember" = "true" ]; then
-    userRole="admin"
-else
-    userRole="standard"
-fi
 
 # === MAP JAMF USERNAME TO LOCAL MAC USERNAME (if needed) ===
 # Assuming they’re same, else you can customize this
